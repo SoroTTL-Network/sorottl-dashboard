@@ -8,7 +8,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorDisplay } from "@/components/ui/error-display";
-import { ChevronLeft, ChevronRight, Eye, Code, Layers } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Code, Layers, RotateCcw } from "lucide-react";
+import { CopyButton } from "@/components/ui/copy-button";
 
 export default function WatchlistPage() {
   const [items, setItems] = useState<WatchlistRecord[]>([]);
@@ -119,6 +120,21 @@ export default function WatchlistPage() {
               <option value="false">Disabled Only</option>
             </select>
           </label>
+
+          {(network !== "" || enabledOnly !== "" || offset !== 0) && (
+            <button
+              type="button"
+              onClick={() => {
+                setNetwork("");
+                setEnabledOnly("");
+                setOffset(0);
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white font-mono text-[11px]"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Reset</span>
+            </button>
+          )}
         </div>
 
         {/* Pagination controls */}
@@ -212,9 +228,12 @@ export default function WatchlistPage() {
 
                   <td className="px-4 py-3 font-mono">
                     {item.contractId ? (
-                      <span title={item.contractId} className="text-sky-300">
-                        {truncateAddress(item.contractId, 6)}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span title={item.contractId} className="text-sky-300">
+                          {truncateAddress(item.contractId, 6)}
+                        </span>
+                        <CopyButton value={item.contractId} label="Contract ID" />
+                      </div>
                     ) : (
                       <span className="text-slate-500">—</span>
                     )}
@@ -276,7 +295,15 @@ export default function WatchlistPage() {
       {expandedId !== null && (
         <Card className="p-4 space-y-2 border-sky-500/30">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-sky-400 font-semibold">Key XDR for Entry #{expandedId}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sky-400 font-semibold">Key XDR for Entry #{expandedId}</span>
+              {items.find((i) => i.id === expandedId)?.keyXdr && (
+                <CopyButton
+                  value={items.find((i) => i.id === expandedId)!.keyXdr}
+                  label="Key XDR"
+                />
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setExpandedId(null)}
