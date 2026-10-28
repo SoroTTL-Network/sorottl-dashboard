@@ -8,7 +8,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorDisplay } from "@/components/ui/error-display";
-import { ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertCircle, RotateCcw } from "lucide-react";
+import { CopyButton } from "@/components/ui/copy-button";
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
@@ -168,6 +169,27 @@ export default function AlertsPage() {
               className="w-24 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono text-xs"
             />
           </label>
+
+          {(network !== "" ||
+            category !== "" ||
+            deliveryStatus !== "" ||
+            watchlistId !== "" ||
+            offset !== 0) && (
+            <button
+              type="button"
+              onClick={() => {
+                setNetwork("");
+                setCategory("");
+                setDeliveryStatus("");
+                setWatchlistId("");
+                setOffset(0);
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white font-mono text-[11px]"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Reset</span>
+            </button>
+          )}
         </div>
 
         {/* Pagination controls */}
@@ -290,9 +312,17 @@ export default function AlertsPage() {
       {expandedAlertId !== null && (
         <Card className="p-4 space-y-3 border-sky-500/30">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-sky-400 font-semibold">
-              Alert Payload Inspection #{expandedAlertId}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sky-400 font-semibold">
+                Alert Payload Inspection #{expandedAlertId}
+              </span>
+              {alerts.find((a) => a.id === expandedAlertId)?.payloadJson && (
+                <CopyButton
+                  value={alerts.find((a) => a.id === expandedAlertId)!.payloadJson!}
+                  label="Payload JSON"
+                />
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setExpandedAlertId(null)}
