@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorDisplay } from "@/components/ui/error-display";
-import { ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, RotateCcw } from "lucide-react";
 
 export default function ObservationsPage() {
   const [observations, setObservations] = useState<TTLObservationRecord[]>([]);
@@ -135,6 +135,22 @@ export default function ObservationsPage() {
               className="w-24 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono text-xs"
             />
           </label>
+
+          {(network !== "" || status !== "" || watchlistId !== "" || offset !== 0) && (
+            <button
+              type="button"
+              onClick={() => {
+                setNetwork("");
+                setStatus("");
+                setWatchlistId("");
+                setOffset(0);
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white font-mono text-[11px]"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Reset</span>
+            </button>
+          )}
         </div>
 
         {/* Pagination controls */}
