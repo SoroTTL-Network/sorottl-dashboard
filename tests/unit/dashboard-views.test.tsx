@@ -166,8 +166,8 @@ describe("Milestone 3 — Operational Dashboard Views", () => {
       });
     });
 
-    it("displays empty state when no watchlist records are returned", async () => {
-      vi.spyOn(apiClient, "getWatchlist").mockResolvedValue({
+    it("resets offset to 0 when filter changes and resets filters via Reset button", async () => {
+      const getWatchlistSpy = vi.spyOn(apiClient, "getWatchlist").mockResolvedValue({
         success: true,
         data: [],
         timestamp: "2026-10-28T08:00:00.000Z",
@@ -176,10 +176,25 @@ describe("Milestone 3 — Operational Dashboard Views", () => {
       render(<WatchlistPage />);
 
       await waitFor(() => {
-        expect(
-          screen.getByText("No monitored contracts found matching current filters."),
-        ).toBeDefined();
-        expect(screen.getByText("0 entries loaded")).toBeDefined();
+        expect(getWatchlistSpy).toHaveBeenCalled();
+      });
+
+      // Change network select
+      const networkSelect = screen.getByLabelText(/Network:/i);
+      fireEvent.change(networkSelect, { target: { value: "mainnet" } });
+
+      await waitFor(() => {
+        expect(getWatchlistSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ network: "mainnet", offset: 0 }),
+        );
+      });
+
+      // Reset button appears and functions
+      const resetButton = screen.getByRole("button", { name: /Reset/i });
+      fireEvent.click(resetButton);
+
+      await waitFor(() => {
+        expect(getWatchlistSpy).toHaveBeenCalledWith(expect.objectContaining({ offset: 0 }));
       });
     });
   });

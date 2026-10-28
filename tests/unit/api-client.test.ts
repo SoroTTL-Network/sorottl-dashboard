@@ -278,4 +278,53 @@ describe("SoroTTLClient API Integration", () => {
 
     await expect(client.getHealth()).rejects.toThrow(ApiNetworkError);
   });
+
+  it("handles malformed non-JSON responses by throwing ApiHttpError", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response("<html><head><title>502 Gateway</title></head></html>", {
+        status: 502,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+
+    await expect(client.getHealth()).rejects.toThrow(ApiHttpError);
+    await expect(client.getHealth()).rejects.toMatchObject({
+      status: 502,
+      code: "HTTP_502",
+    });
+  });
+
+  it("serializes query parameters accurately for all options", async () => {
+    let capturedUrl = "";
+    vi.spyOn(global, "fetch").mockImplementation(async (url) => {
+      capturedUrl = String(url);
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: [],
+          timestamp: "2026-10-28T06:00:00.000Z",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+
+    await client.getAlerts({
+      watchlistId: 42,
+      network: "testnet",
+      category: "low_ttl",
+      deliveryStatus: "failed",
+      limit: 25,
+      offset: 50,
+    });
+
+    expect(capturedUrl).toContain("watchlistId=42");
+    expect(capturedUrl).toContain("network=testnet");
+    expect(capturedUrl).toContain("category=low_ttl");
+    expect(capturedUrl).toContain("deliveryStatus=failed");
+    expect(capturedUrl).toContain("limit=25");
+    expect(capturedUrl).toContain("offset=50");
+  });
 });
