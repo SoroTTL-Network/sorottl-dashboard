@@ -11,9 +11,36 @@ Soroban state entries require periodic TTL lifecycle extension to avoid entry ex
 - **TTL Observations Timeline:** Historical ledger sequence boundaries, remaining ledgers, and confidence classifications.
 - **Alert Dispatch Monitoring:** Real-time visibility into keeper-generated alerts and webhook delivery attempts.
 
-## Security Boundary & Invariants
+## Architecture & Secure Backend Integration
+
+The SoroTTL Dashboard uses a secure internal Next.js server proxy (`/api/backend/[...path]`) to communicate with the `sorottl-backend` HTTP API:
+
+```text
+Browser / Client Views
+       │
+       ▼ (GET/HEAD only)
+Next.js Server Proxy (/api/backend/...)
+  ├── Enforces route allowlist (/health, /api/v1/watchlist, /api/v1/observations, /api/v1/alerts)
+  ├── Rejects directory traversals and disallowed query parameters
+  ├── Strips incoming browser Authorization headers
+  ├── Injects server-side SOROTTL_BACKEND_AUTH_TOKEN
+  ├── Enforces Cache-Control: no-store
+  └── Enforces 10s request timeout & 2MB response size limit
+       │
+       ▼
+SoroTTL Backend (http://127.0.0.1:8080)
+```
+
+- **Frontend Client (`lib/api-client.ts`):** Strictly typed API client consuming the internal proxy, validating responses with runtime Zod schemas (`lib/schemas.ts`), supporting `AbortSignal` cancellation, and normalizing errors into safe typed error classes (`lib/errors.ts`).
+- **Zero Credentials in Browser:** The browser never directly contacts `sorottl-backend` or stores backend bearer tokens.
+
+## Security Boundary & Deployment Boundary
 
 - **Strictly Read-Only:** The dashboard never accepts private keys, never connects to browser wallets, and never signs or submits Stellar transactions.
+- **Backend Authentication vs. Visitor Access Control:**
+  - The proxy's backend token (`SOROTTL_BACKEND_AUTH_TOKEN`) exclusively authenticates the **dashboard server to the backend**.
+  - The proxy does **NOT** authenticate or gate dashboard visitors.
+  - Public or untrusted deployments requiring restricted access must place the dashboard behind appropriate network boundaries (e.g., VPN, internal subnet, or reverse proxy with authentication/SSO).
 - **Zero Secret Exposure:** Backend authentication credentials (`SOROTTL_BACKEND_AUTH_TOKEN`) are restricted to server-side components and proxy routes; secrets are **never** prefixed with `NEXT_PUBLIC_` or exposed in client bundles.
 - **Non-Custodial Architecture:** All state evaluation and persistence is managed independently by `sorottl-backend`.
 
