@@ -1,35 +1,86 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import Link from "next/link";
 import { apiClient } from "@/lib/api-client";
-import type { BackendHealthData } from "@/lib/types";
+import type { BackendHealthData, WatchlistRecord, AlertRecord } from "@/lib/types";
 import { formatDateTime, formatLedger } from "@/lib/formatters";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorDisplay } from "@/components/ui/error-display";
-import { Server, Database, Globe, Cpu, AlertTriangle, ShieldCheck } from "lucide-react";
+import {
+  Server,
+  Database,
+  Globe,
+  Cpu,
+  AlertTriangle,
+  ShieldCheck,
+  Eye,
+  Bell,
+  ArrowRight,
+} from "lucide-react";
 
 export default function OverviewPage() {
   const [health, setHealth] = useState<BackendHealthData | null>(null);
+  const [watchlistSummary, setWatchlistSummary] = useState<{
+    loaded: number;
+    atRisk: number;
+  } | null>(null);
+  const [alertSummary, setAlertSummary] = useState<{
+    loaded: number;
+    failedDelivery: number;
+  } | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const inFlightRef = useRef<boolean>(false);
 
-  const fetchHealth = useCallback(async (_isManual = false) => {
+  const fetchOverviewData = useCallback(async (_isManual = false) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setIsLoading(true);
 
     try {
-      const res = await apiClient.getHealth();
-      if (res.success && res.data) {
-        setHealth(res.data);
-        setLastUpdated(formatDateTime(res.timestamp));
+      const [healthRes, wlRes, alertsRes] = await Promise.allSettled([
+        apiClient.getHealth(),
+        apiClient.getWatchlist({ limit: 50 }),
+        apiClient.getAlerts({ limit: 50 }),
+      ]);
+
+      if (healthRes.status === "fulfilled" && healthRes.value.success && healthRes.value.data) {
+        setHealth(healthRes.value.data);
+        setLastUpdated(formatDateTime(healthRes.value.timestamp));
         setError(null);
       } else {
-        setError(res.error?.message || "Received unsuccessful health status from backend");
+        const errMsg =
+          healthRes.status === "fulfilled"
+            ? healthRes.value.error?.message || "Health check returned unsuccessful"
+            : (healthRes.reason as Error)?.message || "Failed to reach backend";
+        setError(errMsg);
+      }
+
+      if (wlRes.status === "fulfilled" && wlRes.value.success && wlRes.value.data) {
+        const records: WatchlistRecord[] = wlRes.value.data;
+        const atRiskCount = records.filter(
+          (r) =>
+            r.latestObservation?.remainingLedgers !== null &&
+            r.latestObservation?.remainingLedgers !== undefined &&
+            r.latestObservation.remainingLedgers <= r.warningThresholdLedgers,
+        ).length;
+        setWatchlistSummary({
+          loaded: records.length,
+          atRisk: atRiskCount,
+        });
+      }
+
+      if (alertsRes.status === "fulfilled" && alertsRes.value.success && alertsRes.value.data) {
+        const alerts: AlertRecord[] = alertsRes.value.data;
+        const failedCount = alerts.filter((a) => a.deliveryStatus === "failed").length;
+        setAlertSummary({
+          loaded: alerts.length,
+          failedDelivery: failedCount,
+        });
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to connect to backend";
@@ -41,18 +92,18 @@ export default function OverviewPage() {
   }, []);
 
   useEffect(() => {
-    fetchHealth();
+    fetchOverviewData();
 
     // Conservative polling interval: 30 seconds
     const intervalId = setInterval(() => {
       if (document.visibilityState === "visible") {
-        fetchHealth();
+        fetchOverviewData();
       }
     }, 30000);
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        fetchHealth();
+        fetchOverviewData();
       }
     };
 
@@ -62,7 +113,7 @@ export default function OverviewPage() {
       clearInterval(intervalId);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [fetchHealth]);
+  }, [fetchOverviewData]);
 
   return (
     <div className="space-y-6">
@@ -71,7 +122,7 @@ export default function OverviewPage() {
         description="Real-time operational health, upstream RPC connectivity, and keeper daemon status."
         lastUpdated={lastUpdated}
         isLoading={isLoading}
-        onRefresh={() => fetchHealth(true)}
+        onRefresh={() => fetchOverviewData(true)}
         network={health?.network}
       />
 
@@ -80,7 +131,7 @@ export default function OverviewPage() {
           title={health ? "Health Check Warning" : "Backend Unavailable"}
           message={error}
           isStale={!!health}
-          onRetry={() => fetchHealth(true)}
+          onRetry={() => fetchOverviewData(true)}
         />
       )}
 
@@ -170,6 +221,61 @@ export default function OverviewPage() {
           </div>
         </div>
       )}
+
+      {/* Activity Summary Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <Card className="p-5 flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Eye className="h-4 w-4 text-sky-400" />
+              <h2 className="text-sm font-semibold text-slate-200">Monitored Watchlist Sample</h2>
+            </div>
+            <Link
+              href="/watchlist"
+              className="text-xs text-sky-400 hover:text-sky-300 inline-flex items-center gap-1 font-mono"
+            >
+              <span>View Watchlist</span>
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          <div className="space-y-1">
+            <div className="text-2xl font-bold font-mono text-slate-100">
+              {watchlistSummary !== null ? `${watchlistSummary.loaded} loaded` : "—"}
+            </div>
+            <p className="text-xs text-slate-400">
+              {watchlistSummary !== null
+                ? `${watchlistSummary.atRisk} entries at or below configured warning threshold in loaded sample`
+                : "Awaiting watchlist retrieval"}
+            </p>
+          </div>
+        </Card>
+
+        <Card className="p-5 flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bell className="h-4 w-4 text-amber-400" />
+              <h2 className="text-sm font-semibold text-slate-200">Recent Alerts Sample</h2>
+            </div>
+            <Link
+              href="/alerts"
+              className="text-xs text-sky-400 hover:text-sky-300 inline-flex items-center gap-1 font-mono"
+            >
+              <span>View Alerts</span>
+              <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          <div className="space-y-1">
+            <div className="text-2xl font-bold font-mono text-slate-100">
+              {alertSummary !== null ? `${alertSummary.loaded} loaded` : "—"}
+            </div>
+            <p className="text-xs text-slate-400">
+              {alertSummary !== null
+                ? `${alertSummary.failedDelivery} webhook deliveries marked failed in loaded sample`
+                : "Awaiting alert retrieval"}
+            </p>
+          </div>
+        </Card>
+      </div>
 
       {/* Observational Policy Information */}
       <Card className="space-y-4">
