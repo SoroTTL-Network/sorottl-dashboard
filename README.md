@@ -62,13 +62,26 @@ SoroTTL Backend (http://127.0.0.1:8080)
 - **Frontend Client (`lib/api-client.ts`):** Strictly typed API client consuming the internal proxy, validating responses with runtime Zod schemas (`lib/schemas.ts`), supporting `AbortSignal` cancellation, and normalizing errors into safe typed error classes (`lib/errors.ts`).
 - **Zero Credentials in Browser:** The browser never directly contacts `sorottl-backend` or stores backend bearer tokens.
 
+## Security & Visitor Access-Control Architecture
+
+The SoroTTL Dashboard provides two distinct authentication boundaries:
+
+1. **Backend Authentication (Dashboard Server &rarr; SoroTTL Backend):**
+   - Configured via `SOROTTL_BACKEND_AUTH_TOKEN`.
+   - Used exclusively by the internal server proxy (`/api/backend/...`) to authenticate against protected backend endpoints.
+   - Credentials remain strictly server-side and are **never** delivered to client bundles or browser logs.
+
+2. **Visitor Access Control (Browser Visitor &rarr; Dashboard Server):**
+   - Configured via `SOROTTL_ACCESS_MODE` (`public` or `private`).
+   - In **`public` mode** (default), the dashboard is accessible for open community monitoring or public status portals.
+   - In **`private` mode**, visitor authentication is required. Server middleware intercepts all navigation routes and internal proxy endpoints, requiring the visitor to provide `SOROTTL_ACCESS_PASSWORD` (minimum 8 characters).
+   - Valid visitor sessions receive an `HttpOnly`, `SameSite=Lax`, `Secure` (in production) cookie (`sorottl_access_token`).
+   - Programmatic consumers in private mode can authenticate by sending the `x-sorottl-access-password` HTTP header.
+
 ## Security Boundary & Deployment Boundary
 
 - **Strictly Read-Only:** The dashboard never accepts private keys, never connects to browser wallets, and never signs or submits Stellar transactions.
-- **Backend Authentication vs. Visitor Access Control:**
-  - The proxy's backend token (`SOROTTL_BACKEND_AUTH_TOKEN`) exclusively authenticates the **dashboard server to the backend**.
-  - The proxy does **NOT** authenticate or gate dashboard visitors.
-  - Public or untrusted deployments requiring restricted access must place the dashboard behind appropriate network boundaries (e.g., VPN, internal subnet, or reverse proxy with authentication/SSO).
+- **Production Readiness Probe:** Process readiness is available at `GET /api/health/ready`. Orchestrators (Kubernetes/Docker) receive HTTP 200 when configuration is valid, or HTTP 500 when mandatory variables are missing.
 - **Zero Secret Exposure:** Backend authentication credentials (`SOROTTL_BACKEND_AUTH_TOKEN`) are restricted to server-side components and proxy routes; secrets are **never** prefixed with `NEXT_PUBLIC_` or exposed in client bundles.
 - **Non-Custodial Architecture:** All state evaluation and persistence is managed independently by `sorottl-backend`.
 
