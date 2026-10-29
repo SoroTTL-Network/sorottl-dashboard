@@ -48,10 +48,16 @@ export const ServerEnvSchema = z
 
     /**
      * Visitor access control mode:
-     * - 'public': Unauthenticated read-only access (default for public block explorer / status portals).
-     * - 'private': Requires visitors to supply the configured session password via cookie/header.
+     * - In 'production', this MUST be explicitly set to 'public' or 'private' to prevent accidental exposure.
+     * - In 'development' or 'test', defaults to 'public' for frictionless local development.
+     * - 'public': Unauthenticated read-only access.
+     * - 'private': Requires visitors to authenticate with the operator password.
      */
-    accessMode: z.enum(["public", "private"]).default("public"),
+    accessMode: z
+      .enum(["public", "private"], {
+        message: "SOROTTL_ACCESS_MODE must be either 'public' or 'private'",
+      })
+      .optional(),
 
     /**
      * Required when accessMode is 'private'.
@@ -61,19 +67,69 @@ export const ServerEnvSchema = z
       .string()
       .min(8, "SOROTTL_ACCESS_PASSWORD (minimum 8 characters) is required")
       .optional(),
+
+    /**
+     * Independent cryptographic session signing secret used to HMAC-SHA256 sign visitor session tokens.
+     * Must be at least 32 characters long.
+     * In 'production' with 'private' mode, this secret is strictly mandatory.
+     */
+    sessionSecret: z
+      .string()
+      .min(32, "SOROTTL_SESSION_SECRET must be at least 32 characters long")
+      .optional(),
+
+    /**
+     * Whether the application is behind a trusted reverse proxy (e.g. Nginx, Cloudflare, AWS ALB).
+     * When true, x-forwarded-for and x-real-ip headers are evaluated for rate limiting.
+     * When false (default), client IP headers are ignored to prevent header spoofing.
+     */
+    trustProxy: z.boolean().default(false),
   })
   .superRefine((data, ctx) => {
-    if (data.accessMode === "private" && !data.accessPassword) {
+    // 1. Fail-closed production enforcement:
+    // When running in production, SOROTTL_ACCESS_MODE cannot be omitted or defaulted.
+    if (data.nodeEnv === "production" && !data.accessMode) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["accessPassword"],
+        path: ["accessMode"],
         message:
-          "SOROTTL_ACCESS_PASSWORD (minimum 8 characters) is required when SOROTTL_ACCESS_MODE is 'private'",
+          "SOROTTL_ACCESS_MODE must be explicitly defined as 'public' or 'private' in production environments to prevent accidental exposure.",
       });
+    }
+
+    // 2. Private mode requirements
+    const resolvedMode = data.accessMode ?? (data.nodeEnv === "production" ? undefined : "public");
+    if (resolvedMode === "private") {
+      if (!data.accessPassword) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["accessPassword"],
+          message:
+            "SOROTTL_ACCESS_PASSWORD (minimum 8 characters) is required when SOROTTL_ACCESS_MODE is 'private'",
+        });
+      }
+
+      // In production private mode, sessionSecret is strictly required to sign session tokens independently
+      if (data.nodeEnv === "production" && !data.sessionSecret) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sessionSecret"],
+          message:
+            "SOROTTL_SESSION_SECRET (minimum 32 characters) is strictly required in production private mode for secure cryptographic token signing",
+        });
+      }
     }
   });
 
-export type ServerEnv = z.infer<typeof ServerEnvSchema>;
+export interface ServerEnv {
+  nodeEnv: "development" | "test" | "production";
+  backendUrl: string;
+  backendAuthToken?: string;
+  accessMode: "public" | "private";
+  accessPassword?: string;
+  sessionSecret: string;
+  trustProxy: boolean;
+}
 
 /**
  * Public client-side configuration schema.
@@ -91,13 +147,25 @@ export type ClientEnv = z.infer<typeof ClientEnvSchema>;
  * Fails fast with descriptive errors if configuration is malformed.
  */
 export function getServerConfig(): ServerEnv {
+  const nodeEnv = (process.env.NODE_ENV || "development") as "development" | "test" | "production";
+
+  // Parse raw access mode without silent fallback to "public"
+  let rawAccessMode: string | undefined = undefined;
+  if (process.env.SOROTTL_ACCESS_MODE !== undefined && process.env.SOROTTL_ACCESS_MODE !== "") {
+    rawAccessMode = process.env.SOROTTL_ACCESS_MODE.trim().toLowerCase();
+  }
+
+  const rawTrustProxy = process.env.SOROTTL_TRUST_PROXY?.toLowerCase();
+  const trustProxy = rawTrustProxy === "true" || rawTrustProxy === "1";
+
   const result = ServerEnvSchema.safeParse({
-    nodeEnv: process.env.NODE_ENV || "development",
+    nodeEnv,
     backendUrl: process.env.SOROTTL_BACKEND_URL || "http://127.0.0.1:8080",
     backendAuthToken: process.env.SOROTTL_BACKEND_AUTH_TOKEN || undefined,
-    accessMode:
-      (process.env.SOROTTL_ACCESS_MODE?.toLowerCase() as "public" | "private") || "public",
+    accessMode: rawAccessMode,
     accessPassword: process.env.SOROTTL_ACCESS_PASSWORD || undefined,
+    sessionSecret: process.env.SOROTTL_SESSION_SECRET || undefined,
+    trustProxy,
   });
 
   if (!result.success) {
@@ -105,7 +173,19 @@ export function getServerConfig(): ServerEnv {
     throw new Error(`Invalid server environment configuration: ${issues}`);
   }
 
-  return result.data;
+  // Resolved mode: if accessMode was omitted in dev/test, default to "public"
+  const finalAccessMode = result.data.accessMode ?? "public";
+
+  // In non-production development/test mode, if sessionSecret is not provided, use a deterministic dev fallback
+  const finalSessionSecret =
+    result.data.sessionSecret ||
+    (nodeEnv !== "production" ? "dev-secret-only-insecure-change-in-production-min-32-chars" : "");
+
+  return {
+    ...result.data,
+    accessMode: finalAccessMode,
+    sessionSecret: finalSessionSecret,
+  };
 }
 
 /**
