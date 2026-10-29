@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerConfig } from "./lib/config";
+import { verifySessionToken } from "./lib/session";
+import { safePasswordCompare } from "./lib/auth-security";
 
 const ACCESS_COOKIE_NAME = "sorottl_access_token";
 
 /**
  * Middleware handling visitor access control and security header enforcement.
  */
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   let serverConfig;
   try {
     serverConfig = getServerConfig();
@@ -15,10 +17,13 @@ export function middleware(request: NextRequest) {
     if (request.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json(
         { success: false, error: { code: "CONFIG_ERROR", message: "Server configuration error" } },
-        { status: 500, headers: { "Cache-Control": "no-store" } },
+        { status: 500, headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } },
       );
     }
-    return new NextResponse("Server Configuration Error", { status: 500 });
+    return new NextResponse("Server Configuration Error", {
+      status: 500,
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+    });
   }
 
   const { pathname } = request.nextUrl;
@@ -39,18 +44,26 @@ export function middleware(request: NextRequest) {
 
   // Handle visitor authentication when in private mode
   if (serverConfig.accessMode === "private") {
-    // Check for login route or authentication verification endpoint
     const isLoginPath = pathname === "/login";
-    const isAuthApiPath = pathname === "/api/auth/login";
+    const isAuthApiPath = pathname.startsWith("/api/auth/");
+    const isReadinessProbe = pathname === "/api/health/ready";
 
     const cookieToken = request.cookies.get(ACCESS_COOKIE_NAME)?.value;
-    const headerToken = request.headers.get("x-sorottl-access-password");
+    const isCookieAuthorized =
+      !!serverConfig.sessionSecret &&
+      (await verifySessionToken(cookieToken, serverConfig.sessionSecret));
 
-    const isAuthorized =
-      (cookieToken && cookieToken === serverConfig.accessPassword) ||
-      (headerToken && headerToken === serverConfig.accessPassword);
+    // Machine-to-machine password header is restricted strictly to /api/backend/ proxy routes
+    const isBackendApiRoute = pathname.startsWith("/api/backend/");
+    const headerToken = isBackendApiRoute ? request.headers.get("x-sorottl-access-password") : null;
+    const isHeaderAuthorized =
+      !!headerToken &&
+      !!serverConfig.accessPassword &&
+      (await safePasswordCompare(headerToken, serverConfig.accessPassword));
 
-    if (!isAuthorized && !isLoginPath && !isAuthApiPath) {
+    const isAuthorized = isCookieAuthorized || isHeaderAuthorized;
+
+    if (!isAuthorized && !isLoginPath && !isAuthApiPath && !isReadinessProbe) {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json(
           {
@@ -60,7 +73,7 @@ export function middleware(request: NextRequest) {
               message: "Dashboard is configured in private mode. Visitor authentication required.",
             },
           },
-          { status: 401, headers: { "Cache-Control": "no-store" } },
+          { status: 401, headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } },
         );
       }
 
